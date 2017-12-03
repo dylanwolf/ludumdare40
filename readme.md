@@ -1,5 +1,7 @@
 # Ludum Dare 40: WizCorp
 
+**A submission for Ludum Dare 40: https://ldjam.com/events/ludum-dare/40/$64749**
+
 ## Story
 Congratulations on opening your very own WizCorp franchise, $VALUED_INVESTOR_NAME!
 
