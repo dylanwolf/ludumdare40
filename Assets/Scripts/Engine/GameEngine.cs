@@ -8,6 +8,12 @@ public class GameEngine : MonoBehaviour {
     private void Awake()
     {
         Current = this;
+        InitializeSprites();
+    }
+
+    private void Start()
+    {
+        ResetGame();
     }
 
     public float TimePerTick = 1.0f;
@@ -32,12 +38,76 @@ public class GameEngine : MonoBehaviour {
     public long[] SellAutoClickerOutput = new long[] { 1, 10, 100, 1000 };
 
     public long[] StorageUpgradeCosts = new long[] { 10, 100, 1000, 100000 };
-    public long[] StorageAmounts = new long[] { 25, 250, 2500, 10000 };
-    public float[] StorageLevels = new float[] { 1, 0.75f, 0.5f, 0.25f };
+    public long[] StorageAmounts = new long[] { 25, 250, 2500, 10000, 1000000 };
+    public float[] StoragePenalties = new float[] { 1, 0.75f, 0.5f, 0.25f };
     public int StorageIndex = 0;
     public float ActionMultiplier = 1.0f;
 
-    private void ResetGame()
+    public float RawMatStorageGauge = 0;
+    public float ProcessedStorageGauge = 0;
+    public float CraftedStorageGauge = 0;
+
+    public Rect MinerSpawnPoint;
+    public Rect GeomancerSpawnPoint;
+    public Rect ArtificerSpawnPoint;
+    public Rect SalesmanSpawnPoint;
+
+    Dictionary<string, List<Animator>> sprites = new Dictionary<string, List<Animator>>();
+    Dictionary<GameActionType, string> pools = new Dictionary<GameActionType, string>()
+    {
+        { GameActionType.Mine, MINER },
+        { GameActionType.Process, PROCESSOR },
+        { GameActionType.Craft, CRAFTER },
+        { GameActionType.Sell, SELLER },
+    };
+    const string MINER = "WizardPickaxe";
+    const string PROCESSOR = "Geomancer";
+    const string CRAFTER = "Artificer";
+    const string SELLER = "Salesman";
+
+    void InitializeSprites()
+    {
+        foreach (var val in pools.Values)
+            sprites[val] = new List<Animator>();
+
+    }
+
+    Animator tmpAnim;
+    void ClearSprites()
+    {
+        foreach (var key in sprites.Keys)
+        {
+            while (sprites[key].Count > 0)
+            {
+                ObjectPools.Despawn(sprites[key][0].gameObject);
+                sprites[key].RemoveAt(0);
+            }
+        }
+    }
+
+    Vector3 GenerateRandomPoint(Rect boundaries)
+    {
+        return Camera.main.ViewportToWorldPoint(new Vector3(
+                Random.Range(boundaries.min.x, boundaries.max.x),
+                Random.Range(boundaries.min.y, boundaries.max.y),
+                10
+            ));
+    }
+
+    public int MAX_SPRITES = 100;
+
+    void SpawnSprite(GameActionType actionType, int level, Vector3 position)
+    {
+        if (pools.ContainsKey(actionType) && sprites[pools[actionType]].Count < MAX_SPRITES)
+        {
+            tmpAnim = ObjectPools.Spawn<Animator>(pools[actionType], position, null);
+            tmpAnim.speed = 1 + (level * 0.5f);
+            tmpAnim.transform.localScale = new Vector3(2 * (Random.value > 0.5f ? 1 : -1), 2, 1);
+            sprites[pools[actionType]].Add(tmpAnim);
+        }
+    }
+
+    public void ResetGame()
     {
         RawMaterials.SetValue(0);
         ProcessedMaterials.SetValue(0);
@@ -54,6 +124,7 @@ public class GameEngine : MonoBehaviour {
 
         StorageIndex = 0;
         ActionMultiplier = 1.0f;
+        ClearSprites();
     }
 
     public void Queue(GameActionType action)
@@ -63,17 +134,22 @@ public class GameEngine : MonoBehaviour {
 
     public void CalculateMultiplier()
     {
+        RawMatStorageGauge = RawMaterials.GetValue() / (float)StorageAmounts[StorageIndex];
+        ProcessedStorageGauge = ProcessedMaterials.GetValue() / (float)StorageAmounts[StorageIndex];
+        CraftedStorageGauge = CraftedProducts.GetValue() / (float)StorageAmounts[StorageIndex];
+
         ActionMultiplier =
-            StorageLevels[Mathf.Clamp((int)Mathf.Floor(RawMaterials.GetValue() / (float)StorageAmounts[StorageIndex]), 0, StorageLevels.Length - 1)] *
-            StorageLevels[Mathf.Clamp((int)Mathf.Floor(ProcessedMaterials.GetValue() / (float)StorageAmounts[StorageIndex]), 0, StorageLevels.Length - 1)] *
-            StorageLevels[Mathf.Clamp((int)Mathf.Floor(CraftedProducts.GetValue() / (float)StorageAmounts[StorageIndex]), 0, StorageLevels.Length - 1)];
+            StoragePenalties[Mathf.Clamp((int)Mathf.Floor(RawMatStorageGauge), 0, StoragePenalties.Length - 1)] *
+            StoragePenalties[Mathf.Clamp((int)Mathf.Floor(ProcessedStorageGauge), 0, StoragePenalties.Length - 1)] *
+            StoragePenalties[Mathf.Clamp((int)Mathf.Floor(CraftedStorageGauge), 0, StoragePenalties.Length - 1)];
     }
 
     public long GetMultipliedValue(long value)
     {
-        var x = (long)(Mathf.Round(value * ActionMultiplier));
-        if (x < 1) x = 1;
-        return x;
+        return value;
+        //var x = (long)(Mathf.Round(value * ActionMultiplier));
+        //if (value > 0 && x < 1) x = 1;
+        //return x;
     }
 
     public void MineItem(long amount, bool applyPenalty)
@@ -114,22 +190,26 @@ public class GameEngine : MonoBehaviour {
 
     public void BuyAutoClicker(GameActionType actionType, int level)
     {
-        if (ProcessedMaterials.GetValue() >= AutoClickerCosts[level])
+        if (Points.GetValue() >= AutoClickerCosts[level])
         {
-            ProcessedMaterials.Add(-AutoClickerCosts[level]);
+            Points.Add(-AutoClickerCosts[level]);
             switch (actionType)
             {
                 case GameActionType.Mine:
                     MineAutoClickers[level]++;
+                    SpawnSprite(GameActionType.Mine, level, GenerateRandomPoint(MinerSpawnPoint));
                     break;
                 case GameActionType.Process:
                     ProcessAutoClickers[level]++;
+                    SpawnSprite(GameActionType.Process, level, GenerateRandomPoint(GeomancerSpawnPoint));
                     break;
                 case GameActionType.Craft:
                     CraftAutoClickers[level]++;
+                    SpawnSprite(GameActionType.Craft, level, GenerateRandomPoint(ArtificerSpawnPoint));
                     break;
                 case GameActionType.Sell:
                     SellAutoClickers[level]++;
+                    SpawnSprite(GameActionType.Sell, level, GenerateRandomPoint(SalesmanSpawnPoint));
                     break;
             }
         }
@@ -137,10 +217,10 @@ public class GameEngine : MonoBehaviour {
 
     public void UpgradeStorage()
     {
-        if (StorageIndex < StorageLevels.Length - 1 &&
-            ProcessedMaterials.GetValue() >= StorageUpgradeCosts[StorageIndex])
+        if (StorageIndex < StorageUpgradeCosts.Length &&
+            Points.GetValue() >= StorageUpgradeCosts[StorageIndex])
         {
-            ProcessedMaterials.Add(-StorageUpgradeCosts[StorageIndex]);
+            Points.Add(-StorageUpgradeCosts[StorageIndex]);
             StorageIndex++;
         }
     }
@@ -167,40 +247,65 @@ public class GameEngine : MonoBehaviour {
         }
     }
 
-    void ProcessAutoClicker(GameActionType actionType, long[] clickerCounts, long[] clickerOutputs)
+    void ProcessAutoClicker(GameActionType actionType, long[] clickerCounts, long[] clickerOutputs, long minimumOutput = 0)
     {
+        long totalOutput = 0;
+
         for (long i = 0; i < clickerCounts.Length; i++)
         {
-            for (long j = 0; j < clickerCounts[i]; j++)
-            {
-                HandleAction(actionType, clickerOutputs[i], true);
-            }
+            totalOutput += (clickerOutputs[i] * clickerCounts[i]);
         }
+
+        if (totalOutput < minimumOutput)
+            totalOutput = minimumOutput;
+
+        HandleAction(actionType, totalOutput, true);
     }
 
     void Tick()
     {
-        CalculateMultiplier();
-
-        // Process all clicks
-        while (Clicks.Count > 0)
-        {
-            HandleAction(Clicks.Dequeue(), 1, false);
-        }
-
         // Process autoclickers
-        ProcessAutoClicker(GameActionType.Mine, MineAutoClickers, MineAutoClickerOutput);
-        ProcessAutoClicker(GameActionType.Process, ProcessAutoClickers, ProcessAutoClickerOutput);
-        ProcessAutoClicker(GameActionType.Craft, CraftAutoClickers, CraftAutoClickerOutput);
-        ProcessAutoClicker(GameActionType.Sell, SellAutoClickers, SellAutoClickerOutput);
+        ProcessTick(GameActionType.Sell);
+        ProcessTick(GameActionType.Craft);
+        ProcessTick(GameActionType.Process);
+        ProcessTick(GameActionType.Mine);
+    }
 
-        // Enable/disabled click controls based on required mats
+    void ProcessTick(GameActionType actionType, int minimumOutput = 0)
+    {
+        switch (actionType)
+        {
+            case GameActionType.Sell:
+                ProcessAutoClicker(GameActionType.Sell, SellAutoClickers, SellAutoClickerOutput, minimumOutput);
+                break;
+
+            case GameActionType.Craft:
+                ProcessAutoClicker(GameActionType.Craft, CraftAutoClickers, CraftAutoClickerOutput, minimumOutput);
+                break;
+
+            case GameActionType.Process:
+                ProcessAutoClicker(GameActionType.Process, ProcessAutoClickers, ProcessAutoClickerOutput, minimumOutput);
+                break;
+
+            case GameActionType.Mine:
+                ProcessAutoClicker(GameActionType.Mine, MineAutoClickers, MineAutoClickerOutput, minimumOutput);
+                break;
+        }
     }
 
 
     // Update is called once per frame
     void Update () {
-        timer += Time.deltaTime;
+        CalculateMultiplier();
+
+        // Process all clicks
+        while (Clicks.Count > 0)
+        {
+            ProcessTick(Clicks.Dequeue(), 1);
+            //HandleAction(Clicks.Dequeue(), 1, false);
+        }
+
+        timer += (Time.deltaTime * ActionMultiplier);
         while (timer > TimePerTick)
         {
             Tick();
