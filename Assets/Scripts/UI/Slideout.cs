@@ -23,7 +23,20 @@ public class Slideout : MonoBehaviour {
     {
         _rt = GetComponent<RectTransform>();
         extensionSize = _rt.offsetMax.x;
-        state = SlideState.Extended;
+        CollapseImmediate();
+    }
+
+    void CollapseImmediate()
+    {
+        state = SlideState.Collapsed;
+
+        tmpV2 = _rt.offsetMin;
+        tmpV2.x = -extensionSize;
+        _rt.offsetMin = tmpV2;
+
+        tmpV2 = _rt.offsetMax;
+        tmpV2.x = 0;
+        _rt.offsetMax = tmpV2;
     }
 
     Vector2 tmpV2;
